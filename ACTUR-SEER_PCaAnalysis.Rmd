@@ -1,0 +1,288 @@
+---
+title: "ACTUR-SEER Data Analysis"
+author: "Darryl Nousome"
+date: "12/21/2020"
+output: 
+  word_document:
+    reference_docx: "/home/dnousome/Documents/margins.docx"
+
+---
+
+```{r setup, include=FALSE,echo=F}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(kableExtra)
+library(tidyverse)
+library(arsenal)
+library(haven)
+
+
+labelsdt=list(year_cat="Year of Diagnosis",age="Age at diagonsis",age_cat5="Age Categories",race_new="Race",
+              stage_final1="Tumor Stage",tumor_grade1="Tumor Grade",age_cat1="Age Categories",
+              PSA="PSA",PSA_category="PSA Positive/Negative",PSA_cat="PSA Categories",PSA_cat_rem="PSA Categories",
+              radiation_new="Consolidated Radiation",
+              CSsitespecificfactor12004varyi="SEER PSA",Gleason_prostatectomy="Gleason from Prostatectomy",
+              Gleason_biopsy="Gleason from Biopsy", Gleason_any="Gleason received",
+              Gleason_final="Final Gleason Score",Gleason_final_rem="Final Gleason Score",
+              Gleason_final_method1="Final Gleason Score from Method")
+
+dt_final=read_rds("~/Documents/G/Work_Bench/Epidemiology/Projects/MCC_CPDR SEERACTUR 2020/Data/mcc_actur.rds") %>%
+  mutate(dataset=factor(dataset,levels=c("SEER","ACTUR"))) %>%
+  mutate(Dxyr_PSA=factor(Dxyr_PSA,levels=c("0","1","2","3","8","9"),
+                         labels=c("2010-2013 & PSA 0-<4","2010-2013 & PSA 4-<10","2010-2013 & PSA 10-<20","2010-2013 & PSA \u226520",
+                                  "2010-2013 & PSA Missing","All Other years & PSA Missing"))) %>%
+  mutate(PSA_cat_rem=factor(PSA_cat_rem,levels = c("1","2","3","4"),labels=c("0-<4","4-<10","10-<20","\u226520"))) %>%
+  mutate(Gleason_final_rem=cut(Gleason_final_rem,breaks =c(6,7,8,11),labels=c("6","7","8-10"),right=F)) %>%
+  mutate(Gleason_final_method1=ifelse(is.na(Gleason_final_rem),NA,Gleason_final_method))
+ 
+
+```
+
+
+## Summary tables
+```{r tables,echo=F}
+tab.noby <- tableby(dataset~ age+age_cat1+year_cat+race_new+Hispanic+stage_final1+tumor_grade1+PSA+PSA_category+PSA_cat_rem+
+                      Gleason_final_rem+Gleason_final_method1+Surgery+radiation_new, data=dt_final,test=T,total=F) 
+
+summary(tab.noby,labelTranslations=labelsdt,digits=1) %>% 
+  kable(format="markdown") %>%
+  add_footnote(c("PSA values and Gleason scores were restricted for data only from 2010-2013",
+                 "Missing Tumor Grade was replaced by Gleason score when available"),notation = "none")
+
+```
+
+## Overall death and five-year survival
+162 deaths occur after 2013 and are coded as non-deaths in ACTUR in the time period for overall survival  
+176 with deaths however, they do not have death dates in DEERS their date date will be recoded to date of last contact  
+2 with deaths before dx date in ACTUR: IDs 3703, 5212. Respective pairs in SEER will be dropped as well  
+
+Five year survival was calculated and log-rank survival curves were tested
+```{r surv,echo=F,warning=F,message=F, fig.width=10,fig.height=8}
+dt_surv=read_rds("../Data/mcc_actur_surv.rds") %>%
+
+  mutate(Dxyr_PSA=factor(Dxyr_PSA,levels=c("0","1","2","3","8","9"),
+                         labels=c("2010-2013 & PSA 0-<4","2010-2013 & PSA 4-<10","2010-2013 & PSA 10-<20","2010-2013 & PSA \u226520",
+                                  "2010-2013 & PSA Missing","All Other years & PSA Missing"))) %>%
+  mutate(PSA_cat_rem=factor(PSA_cat_rem,levels = c("1","2","3","4"),labels=c("0-<4","4-<10","10-<20","\u226520"))) %>%
+  mutate(dataset=factor(dataset,levels=c("SEER","ACTUR")))
+
+library(survival)
+library(survminer)
+fit <- survfit(Surv(fiveyear_FU, fiveyear_death) ~ dataset,
+               data = dt_surv)
+ggsurvplot(fit, data = dt_surv, risk.table = 'nrisk_cumevents', conf.int = T,censor=F,pval=T,fontsize=4,tables.y.text=F, legend.labs = c("ACTUR", "SEER"),xlab="Time (Months)",
+           title="Five Year Survival Between ACTUR/SEER")
+
+
+dt_surv_t3=dt_surv %>% filter(stage_final==3)
+fit <- survfit(Surv(fiveyear_FU, fiveyear_death) ~ dataset,
+               data = dt_surv_t3)
+ggsurvplot(fit, data = dt_surv_t3, risk.table = 'nrisk_cumevents', conf.int = T,censor=F,pval=T,fontsize=4,tables.y.text=F, legend.labs = c("ACTUR", "SEER"),xlab="Time (Months)",
+                    title="Five Year Survival Between ACTUR/SEER (T3 Stage only)")
+
+dt_surv_t4=dt_surv %>% filter(stage_final==4)
+fit <- survfit(Surv(fiveyear_FU, fiveyear_death) ~ dataset,
+               data = dt_surv_t4)
+ggsurvplot(fit, data = dt_surv_t4, risk.table = 'nrisk_cumevents', conf.int = T,censor=F,pval=T,fontsize=4,tables.y.text=F, legend.labs = c("ACTUR", "SEER"),xlab="Time (Months)",
+                    title="Five Year Survival Between the ACTUR/SEER (T4 Stage only)")
+```
+
+
+
+### Cox Proportional Hazard Modeling
+Used a multivariable Cox proportional hazards model to estimate hazard ratios (HRs) and 95% confidence intervals (CIs) for 5-year survival between ACTUR cases and SEER cases. Stratified on Matching ID to account for matched data. Schoenfeld residuals were examined to fufill assumptions of PH.
+As mentioned in the data consolidation results, Gleason and PSA were used only from 2010 onward for both datasets. For Gleason, the prostatectomy score was preferred over the biopsy score. An indicator was created for those years prior to 2010 to ensure sample size was preserved.   
+```{r cox,echo=F,message=F,warning=F}
+
+
+#dt_surv_check=dt_surv %>% filter(DEERS_Death_Date=="" & death_new==1 &dataset=="ACTUR")
+
+
+labels_coxph=c(labelsdt,
+           `datasetACTUR`="ACTUR vs SEER",
+           `stage_final14`="Stage 4 vs Stage 3",
+            `tumor_grade12`="Grade 2 vs Grade 1",
+            `tumor_grade13`="Grade 3 vs Grade 1",
+            `tumor_grade14`="Grade 4 vs Grade 1",
+            `tumor_grade_gleasonUnknown/Missing`="Unknown vs Grade 1",
+           `SurgeryUnknown/Missing`="Surgery Unknown vs No",
+           `SurgeryYes`="Surgery Yes vs No",
+           `radiation_newUnknown/Missing`="Radiation Unknown vs No",
+           `radiation_newYes`="Radiation Yes vs No",
+           `age`="Age (Continuous)",
+           `as.factor(hispanic)1`="Hispanic vs Non-Hispanic",
+           `as.factor(hispanic)9`="Hispanic vs Unknown Hispanic",
+           `PSA_cat[4,10)`="PSA 4-<10 vs <4",
+           `PSA_cat[10,20)`="PSA 10-<20 vs <4",
+           `PSA_cat[20,96)`="PSA \u226520 vs <4",
+          `as.factor(as.numeric(Dxyr_PSA))2`="PSA 4-<10 vs 0-<4",
+          `as.factor(as.numeric(Dxyr_PSA))3`="PSA 10-<20 vs 0-<4",
+          `as.factor(as.numeric(Dxyr_PSA))4`="PSA \u226520 vs 0-<4",
+          `as.factor(as.numeric(Dxyr_PSA))5`="PSA Missing in 2010-2013 vs PSA 0-<4",
+          `as.factor(as.numeric(Dxyr_PSA))6`="All Other years PSA Missing vs PSA 0-<4",
+
+           `tumor_grade_gleason2`="Grade 2 vs 1",
+           `tumor_grade_gleason3`="Grade 3 vs 1",
+                      `tumor_grade1Unknown/Missing`="Unknown vs 1",
+
+            `tumor_grade_gleasonMissing/Unknown`="Missing Grade vs 1",
+           Gleason_ind="Gleason indicator variable",
+           PSA_cat_ind="PSA indicator variable")
+
+
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+
+                 
+                    strata(pair),
+                 data=dt_surv,family="survival"),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown") %>%
+  add_footnote(c("Missing Tumor Grade was replaced by Gleason score when available","PSA available only from 2010-2013"),notation = "none")
+
+
+
+fit1=coxph(Surv(fiveyear_FU, fiveyear_death) ~dataset+stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+
+                 
+                    strata(pair),data=dt_surv)
+ggcoxdiagnostics(fit1, type = "schoenfeld")
+  
+```
+
+### Stratified Analyses  
+Stratified analyses were performed by restricting to variables that were significantly associated with survival times to examine if there were differences in that variable between ACTUR and SEER. 
+Models were adjusted for Grade, Stage, Surgery, Radiation, Age, Hispanic ethnicity, PSA, Gleason, and matched. The variable was not included when the model was stratified.
+```{r strat,echo=F,message=F,warning=F}
+
+##STRAT
+surv1=filter(dt_surv,stage_final1==3)
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Stage 3")
+
+surv1=filter(dt_surv,stage_final1==4)
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Stage 4")
+
+##Grade
+#surv1=filter(dt_surv,tumor_grade1==1)
+#summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+Surgery+radiation_new+age+as.factor(hispanic)+strata(pair)+as.factor(PSA_cat)+as.factor(Gleason_final),
+#                 data=surv1,family="survival",show.adjust=F),
+#       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+#  kable(format="markdown",caption="Grade 1")
+
+surv1=filter(dt_surv,tumor_grade_gleason==1)
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1++as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Grade 1")
+
+surv1=filter(dt_surv,tumor_grade_gleason==2)
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1++as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Grade 2")
+
+surv1=filter(dt_surv,tumor_grade_gleason==3)
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1++as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Grade 3")
+
+
+
+##Age
+surv1=filter(dt_surv,age_cat1=="<50")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Age <50")
+
+ 
+
+surv1=filter(dt_surv,age_cat1=="50-<65")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Age 50-<65")
+
+surv1=filter(dt_surv,age_cat1=="≥65")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Age ≥65")
+
+
+##Race
+surv1=filter(dt_surv,race_new=="Asian or Pacific Islander")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Race Asian or Pacific Islander")
+
+ surv1=filter(dt_surv,race_new=="Black")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Race Black")
+
+
+surv1=filter(dt_surv,race_new=="White")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="White")
+
+
+
+                                           
+
+
+##SURG
+surv1=filter(dt_surv,Surgery=="Yes")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Surgery Yes")
+
+surv1=filter(dt_surv,Surgery=="No")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   radiation_new+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Surgery No")
+
+
+
+##Radiation
+surv1=filter(dt_surv,radiation_new=="Yes")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Radiation Yes")
+
+surv1=filter(dt_surv,radiation_new=="No")
+summary(modelsum(Surv(fiveyear_FU, fiveyear_death) ~dataset,adjust=~stage_final1+tumor_grade_gleason+as.factor(as.numeric(Dxyr_PSA))+
+                   Surgery+age+as.factor(hispanic)+strata(pair),
+                 data=surv1,family="survival",show.adjust=F),
+       labelTranslations=labels_coxph,digits=2,digits.p=3,digits.ratio=2) %>%
+  kable(format="markdown",caption="Radiation No")
+
+```
+

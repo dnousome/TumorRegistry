@@ -1,0 +1,167 @@
+---
+title: "ACTUR-SEER Data Consolidation"
+author: "Darryl Nousome"
+date: "12/21/2020"
+output: 
+  word_document:
+    reference_docx: "/home/dnousome/Documents/margins.docx"
+
+---
+
+```{r setup, include=FALSE,echo=F}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(kableExtra)
+library(tidyverse)
+library(arsenal)
+library(haven)
+dt_final=read_rds("~/Documents/G/Work_Bench/Epidemiology/Projects/MCC_CPDR SEERACTUR 2020/Data/mcc_actur.rds")
+labelsdt=list(year_cat="Year of Diagnosis",age="Age at diagonsis",age_cat5="Age Categories",race_new="Race",
+              stage_final1="Tumor Stage",tumor_grade1="Tumor Grade",
+              PSA="PSA",PSA_category="PSA Positive/Negative",PSA_cat="PSA Categories",
+              radiation_new="Consolidated Radiation",
+              CSsitespecificfactor12004varyi="SEER PSA",Gleason_prostatectomy="Gleason from Prostatectomy",
+              Gleason_biopsy="Gleason from Biopsy", Gleason_any="Gleason received",Gleason_final="Final Gleason Score",Gleason_final_method="Final Gleason Score from Method")
+
+```
+
+## Variable Cleaning
+Matching variables (age, race, diagnosis year) were included in the dataset. Additional variables including surgery, radiation, PSA, Gleason score will be processed and consolidated.  
+
+## Surgery
+```{r surg,echo=F,results="asis"}
+d=tableby(dataset~RX_Summ__Surg_Prim_Site+Sitespecificsurgery19731997var+RX_Summ_Surg_Prim_Site_1998,data=dt_final,total=F,test=F) 
+summary(d,title="Original Surgery Variables from ACTUR and SEER") 
+```
+
+
+For both ACTUR and SEER  
+00 replaced to No surgery  
+99/Blank -> Unknown/Missing  
+14-90-> Yes
+  
+For SEER, the variable for surgery from 1973-1997 (Site specific surgery (1973-1997 varying)):  
+01, 02, 03, 05, 06, 07-> No surgery  
+
+Referenced https://seer.cancer.gov/archive/manuals/historic/AppendD.pdf
+  
+  
+For SEER 1998+, (RX_Summ_Surg_Prim_Site_1998 variable) used the NAACR and SEER 2003 guidelines
+
+For Reference:  
+Original NAACR  
+00: None  
+10-19: Site-specific codes; tumor destruction  
+20-80: Site-specific codes; resection  
+90: Surgery, NOS  
+98: Site-specific codes; special  
+99: Unknown  
+
+## Radiation
+```{r radiation,echo=F,results="asis"}
+d=tableby(dataset~Radiation+RX_Summ__Radiation,data=dt_final,total=F,test=F) 
+summary(d,title="Original Radiation Variables from ACTUR and SEER") 
+```
+SEER: Beam radiation, Combination of beam with implants or isotopes, Radiation, NOS  method or source not specified, Radioactive implants, Radioisotopes- Coded to Yes  
+None/refused-> No  
+Unknown, Recommended, unknown if administered->  Unknown/Missing  
+  
+ACTUR: 1-6 Coded to Yes  
+0,7-> No  
+8,9 or Blank->Unknown/Missing
+
+Original NAACR  
+0: None  
+1: Beam radiation  
+2: Radioactive implants  
+3: Radioisotopes  
+4: Combination of 1 with 2 or 3  
+5: Radiation, NOS—method or source not specified  
+7: Patient or patient's guardian refused*  
+8: Radiation recommended, unknown if administered*  
+9: Unknown if radiation therapy administered  
+
+## Gleason  
+```{r gleason,echo=F,results="asis"}
+dt_g=dt_final %>% mutate(Gleason_biopsy=ifelse(is.na(Gleason_biopsy),"NA",Gleason_biopsy)) %>%
+  mutate(Gleason_prostatectomy=ifelse(is.na(Gleason_prostatectomy),"NA",Gleason_prostatectomy)) %>%
+  mutate(Gleason_biopsy=factor(Gleason_biopsy,levels=c("NA","6","7","8","9","10"))) %>%
+  mutate(Gleason_prostatectomy=factor(Gleason_prostatectomy,levels=c("NA","6","7","8","9","10")))
+
+
+d=tableby(Gleason_biopsy~Gleason_prostatectomy,data=dt_g,total=F,test=F) 
+
+summary(d,title="Gleason Biopsy/Prostatectomy") 
+
+
+#library(xtable)
+#df <- data.frame(vertical_title = dt_g$Gleason_biopsy, horitzontal_title = dt_g$Gleason_prostatectomy)
+#df <- as.data.frame.matrix(table(df)) 
+
+
+#print(xtable(df,
+          #  align = "|l|rrr|",
+#            caption = "Test"),
+#      caption.placement = 'top',
+#      comment = F,
+#      scalebox=1,
+#      include.rownames = T,
+#      hline.after = c(-1,0,nrow(df)),
+#      vline.after = c(1),
+#      format.args=list(big.mark = ",", decimal.mark = "."))
+
+```  
+A large majority are missing Gleason scores, however, more are missing in the prostatectomy group.
+
+
+ACTUR/SEER: 988,998,999 Coded to Missing  
+000, 002, 003,004,005 -> Missing since these are not valid scores  
+A new consolidated variable for Gleason was created taking the prostatectomy score first followed by biopsy
+
+Examine the Gleason score by Year
+```{r gleason_time,echo=F,results="asis"}
+
+
+d=tableby(year_cat~Gleason_any+Gleason_prostatectomy+Gleason_biopsy+Gleason_final+Gleason_final_method,data=dt_final,total=F,test=T) 
+summary(d,title="Gleason Biopsy/Prostatectomy split by time",labelTranslations=labelsdt) 
+
+dt_a=dt_final %>% filter(year_cat %in% c("2000-2004","2005-2009","2010-2013") & dataset=="ACTUR")
+d=tableby(year_cat~Gleason_any+Gleason_prostatectomy+Gleason_biopsy+Gleason_final+Gleason_final_method,data=dt_a,total=F,test=T) 
+summary(d,title="Gleason Biopsy/Prostatectomy in ACTUR",labelTranslations=labelsdt) 
+
+dt_s=dt_final %>% filter(year_cat %in% c("2000-2004","2005-2009","2010-2013") & dataset=="SEER")
+d=tableby(year_cat~Gleason_any+Gleason_prostatectomy+Gleason_biopsy+Gleason_final+Gleason_final_method,data=dt_s,total=F,test=T) 
+summary(d,title="Gleason Biopsy/Prostatectomy in SEER",labelTranslations=labelsdt) 
+```  
+
+### Compare Gleason 
+Compare Gleasons across methods for patients that have both Gleason types
+n=1501 for participants that have both.
+```{r gleacomp,echo=F,results='asis'}
+t1=dt_final %>% filter(!is.na(Gleason_biopsy),!is.na(Gleason_prostatectomy)) %>% select(Gleason_biopsy,Gleason_prostatectomy,pair,dataset) %>%
+  mutate(ID=paste0(pair,"_",dataset)) %>% mutate(ID=make.unique(ID)) 
+t2=pivot_longer(t1,c(Gleason_biopsy,Gleason_prostatectomy))
+ggplot(t2,aes(x=name,fill=factor(value,levels=c(10:6)))) +geom_bar(position="fill") + labs(fill = "Gleason Score") +xlab("Gleason Type")
+tt=t.test(t1$Gleason_biopsy,t1$Gleason_prostatectomy,paired=T)
+d=tableby(name~value,data=t2,total=F,test=T) 
+summary(d,title="Gleason in those with both Biopsy and Prostatectomy") 
+```
+
+### PSA
+Similar approach with PSA
+PSA split by time  
+```{r psa,echo=F,results="asis"}
+d=tableby(year_cat~PSA+PSA_category,data=dt_final,total=F,test=T) 
+```
+
+```{r psaactur,echo=F,results="asis"}
+d=tableby(year_cat~PSA+PSA_category,data=dt_a,total=F,test=T) 
+summary(d,title="PSA in ACTUR") 
+```
+
+```{r psaseer,echo=F,results="asis"}
+d=tableby(year_cat~PSA+PSA_category,data=dt_s,total=F,test=T) 
+summary(d,title="PSA in SEER") 
+```  
+
+More missing PSA in the SEER Group, notably during 2000-2009. To be comparable, PSA from ACTUR will not be included as well until 2010.
