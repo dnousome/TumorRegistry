@@ -1,7 +1,7 @@
 ---
 title: "ACTUR-SEER Data Consolidation"
 author: "Darryl Nousome"
-date: "12/21/2020"
+date: "12/31/2020"
 output: 
   word_document:
     reference_docx: "/home/dnousome/Documents/margins.docx"
@@ -17,7 +17,7 @@ library(arsenal)
 library(haven)
 dt_final=read_rds("~/Documents/G/Work_Bench/Epidemiology/Projects/MCC_CPDR SEERACTUR 2020/Data/mcc_actur.rds")
 labelsdt=list(year_cat="Year of Diagnosis",age="Age at diagonsis",age_cat5="Age Categories",race_new="Race",
-              stage_final1="Tumor Stage",tumor_grade1="Tumor Grade",
+              stage_final1="Tumor Stage",tumor_grade_gleason="Tumor Grade Consolidated",
               PSA="PSA",PSA_category="PSA Positive/Negative",PSA_cat="PSA Categories",
               radiation_new="Consolidated Radiation",
               CSsitespecificfactor12004varyi="SEER PSA",Gleason_prostatectomy="Gleason from Prostatectomy",
@@ -146,6 +146,19 @@ tt=t.test(t1$Gleason_biopsy,t1$Gleason_prostatectomy,paired=T)
 d=tableby(name~value,data=t2,total=F,test=T) 
 summary(d,title="Gleason in those with both Biopsy and Prostatectomy") 
 ```
+
+### Final Tumor Grade Consolidated Gleason 
+Additionally for Gleason scores, we will use the Gleason scores first to identify the Tumor Grade (Pathologic examination determines the grade https://seer.cancer.gov/tools/grade/).
+If we are unable to set the tumor grade through Gleason from 2010-2013, then use the original grade given from the database.  
+
+```{r gleagrade,echo=F,results='asis'}
+
+d=tableby(dataset~tumor_grade_gleason,data=dt_final,total=F,test=T) 
+summary(d,title="Final Grade/Gleason",labelTranslations=labelsdt) 
+
+
+```
+
 
 ### PSA
 Similar approach with PSA

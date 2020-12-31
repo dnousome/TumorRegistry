@@ -99,7 +99,6 @@ dt_final=dt %>%
                                      ifelse(!is.na(Gleason_biopsy),"Biopsy",NA))) %>%
 
   mutate(tumor_grade=ifelse(tumor_grade==9,"Unknown/Missing",tumor_grade))   %>%
-  mutate(tumor_grade1=as.factor(ifelse(tumor_grade==9,"Unknown/Missing",tumor_grade))) %>%
   mutate(stage_final1=as.factor(stage_final)) %>%
   mutate(PSA_cat=cut(PSA,breaks = c(0,4,10,20,96),include.lowest = F,right = F,labels=c("0-<4","4-<10","10-<20","\u226520"))) %>%
   mutate(Hispanic=recode(hispanic,`0`="Non-Hispanic",`1`="Hispanic",`9`="Unknown")) %>%
@@ -108,6 +107,15 @@ dt_final=dt %>%
   mutate(Gleason_final_rem=ifelse(!(year_cat %in% '2010-2013') & !is.na(Gleason_final),NA,Gleason_final)) %>%
   
   mutate(age_cat1=cut(age,breaks = c(0,50,65,100),labels=c("<50","50-<65","\u226565"),right = F)) %>%
+  mutate(Dxyr_PSA_all=ifelse(year_cat=="2010-2013" & is.na(PSA_cat),8,
+                             ifelse(!year_cat=="2010-2013" & is.na(PSA_cat),9,
+                         ifelse(PSA_cat=="0-<4",0,
+                                ifelse(PSA_cat=="4-<10",1,
+                                       ifelse(PSA_cat=="10-<20",2,
+                                              ifelse(PSA_cat=="\u226520",3,9
+                                                     ))))))) %>%
+  
+  
   mutate(Dxyr_PSA=ifelse(year_cat=="2010-2013" & is.na(PSA_cat),8,
                                 ifelse(year_cat=="2010-2013" & PSA_cat=="0-<4",0,
                          ifelse(year_cat=="2010-2013" & PSA_cat=="4-<10",1,
@@ -116,12 +124,16 @@ dt_final=dt %>%
                                               
                                                      ifelse(!year_cat=="2010-2013" & is.na(PSA_cat),9,9
                                                      ))))))) %>%
-  mutate(tumor_grade_gleason=ifelse(tumor_grade1=="Unknown/Missing" & Gleason_final_rem=='6','1',
-                                     ifelse(tumor_grade1=="Unknown/Missing" & Gleason_final_rem=='7','3',
-                                             ifelse(tumor_grade1=="Unknown/Missing" & Gleason_final_rem=='8-10','3',tumor_grade1)))) %>%
-  mutate(tumor_grade_gleason=ifelse(tumor_grade_gleason=='4','3',tumor_grade_gleason)) %>%
-  mutate(tumor_grade_gleason=ifelse(is.na(tumor_grade_gleason) | tumor_grade_gleason=='5',"Unknown/Missing",tumor_grade_gleason)) %>%
-  mutate(tumor_grade_gleason=factor(tumor_grade_gleason,levels=c("1","2","3","Unknown/Missing"),labels=c("1","2","3","Unknown/Missing")))
+  
+  ##Use Gleason first for grade
+  mutate(tumor_grade_gleason=ifelse(is.na(Gleason_final_rem),tumor_grade,
+                                    ifelse(Gleason_final_rem=='6','1',
+                                     ifelse(Gleason_final_rem=='7','2',
+                                             ifelse(Gleason_final_rem=='8-10','3',tumor_grade))))) %>%
+
+#  mutate(tumor_grade_gleason=ifelse(tumor_grade_gleason=='4','3',tumor_grade_gleason)) %>%
+#  mutate(tumor_grade_gleason=ifelse(is.na(tumor_grade_gleason) | tumor_grade_gleason=='5',"Unknown/Missing",tumor_grade_gleason)) %>%
+  mutate(tumor_grade_gleason=factor(tumor_grade_gleason,levels=c("1","2","3","4","Unknown/Missing"),labels=c("1","2","3","4","Unknown/Missing")))
 
 
 ###Check the surgery variable
@@ -195,12 +207,12 @@ group_by(dt_time_fix,dataset) %>% summarize(mean(fiveyear_FU,na.rm=T),mean(fivey
 
   
 dt1=dt_time %>% 
-  select(region,pair,age,age_cat1,race_new,Hispanic,year_cat,Year_of_Diagnosis,age_cat5,tumor_grade,radiation_new,
+  select(region,pair,age,age_cat1,race_new,Hispanic,year_cat,Year_of_Diagnosis,age_cat5,radiation_new,
          dataset,PSA,PSA_category,PSA_cat,PSA_cat_rem,
          Gleason_old,Gleason_biopsy,Gleason_prostatectomy,Gleason_any,Gleason_final,Gleason_final_rem,
-         Gleason_final_method,Dxyr_PSA,
+         Gleason_final_method,tumor_grade_gleason,Dxyr_PSA,Dxyr_PSA_all,tumor_grade,
          Surgery,RX_Summ__Surg_Prim_Site,Sitespecificsurgery19731997var,RX_Summ_Surg_Prim_Site_1998,
-         death_new,time_dx_death,stage_final1,tumor_grade1,Radiation,RX_Summ__Radiation) 
+         death_new,time_dx_death,stage_final1,Radiation,RX_Summ__Radiation) 
 
 
 ##Dt1 is the full cohort
